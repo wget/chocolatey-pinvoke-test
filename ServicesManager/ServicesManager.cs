@@ -105,7 +105,7 @@ class ServicesManager
         Marshal.PtrToStructure(ptr, serviceDelayed);
         Marshal.FreeHGlobal(ptr);
 
-        SERVICE_STATUS serviceStatus = new SERVICE_STATUS();
+        ServiceStatus serviceStatus = new ServiceStatus();
         if (!QueryServiceStatus(
                 serviceHandle,
                 out serviceStatus)) {
@@ -279,21 +279,7 @@ class ServicesManager
     }
     
     public class QueryServiceStatusClass {
-        public ServiceStatusClass lpServiceStatus = new ServiceStatusClass();
-    }
-
-    public class ServiceStatusClass {
-        // From the struct SERVICE_STATUS
-        // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685996(v=vs.85).aspx
-        // used by the function QueryServiceStatus()
-        // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684939(v=vs.85).aspx
-        public uint dwServiceType { get; set; }
-        public uint dwCurrentState { get; set; }
-        public uint dwControlsAccepted { get; set; }
-        public uint dwWin32ExitCode { get; set; }
-        public uint dwServiceSpecificExitCode { get; set; }
-        public uint dwCheckPoint { get; set; }
-        public uint dwWaitHint { get; set; }
+        public ServiceStatus lpServiceStatus = new ServiceStatus();
     }
 
     // Based on System.ServiceProcess.ServiceControllerStatus
@@ -399,29 +385,27 @@ class ServicesManager
         public bool fDelayedAutostart;
     }
 
+    // From the struct ServiceStatus
+    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685996(v=vs.85).aspx
+    // used by the function QueryServiceStatus()
+    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684939(v=vs.85).aspx
     [StructLayoutAttribute(LayoutKind.Sequential)]
-    public struct SERVICE_STATUS {
+    public struct ServiceStatus {
 
         /// DWORD->unsigned int
-        public uint dwServiceType;
-
+        public uint dwServiceType { get; set; }
         /// DWORD->unsigned int
-        public uint dwCurrentState;
-
+        public uint dwCurrentState { get; set; }
         /// DWORD->unsigned int
-        public uint dwControlsAccepted;
-
+        public uint dwControlsAccepted { get; set; }
         /// DWORD->unsigned int
-        public uint dwWin32ExitCode;
-
+        public uint dwWin32ExitCode { get; set; }
         /// DWORD->unsigned int
-        public uint dwServiceSpecificExitCode;
-
+        public uint dwServiceSpecificExitCode { get; set; }
         /// DWORD->unsigned int
-        public uint dwCheckPoint;
-
+        public uint dwCheckPoint { get; set; }
         /// DWORD->unsigned int
-        public uint dwWaitHint;
+        public uint dwWaitHint { get; set; }
     }
 
     // Some import statements are inspired from some public solutions from
@@ -442,7 +426,7 @@ class ServicesManager
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "QueryServiceConfig2W")]
     public static extern bool QueryServiceConfig2(IntPtr hService, UInt32 dwInfoLevel, IntPtr buffer, UInt32 cbBufSize, out UInt32 pcbBytesNeeded);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "QueryServiceStatus")]
-    public static extern bool QueryServiceStatus(IntPtr hService, out SERVICE_STATUS lpServiceStatus);
+    public static extern bool QueryServiceStatus(IntPtr hService, out ServiceStatus lpServiceStatus);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CloseServiceHandle")]
     public static extern bool CloseServiceHandle(IntPtr hSCObject);
 
@@ -558,7 +542,7 @@ class ServicesManager
 
 
             // QUERY_SERVICE_CONFIG > dwServiceType
-            // same as SERVICE_STATUS > dwServiceType
+            // same as ServiceStatus > dwServiceType
 
 
             // QUERY_SERVICE_CONFIG > dwStartType
@@ -587,7 +571,7 @@ class ServicesManager
             public const int SERVICE_ERROR_SEVERE = 2;
 
 
-            // SERVICE_STATUS > dwServiceType
+            // ServiceStatus > dwServiceType
 
             /// SERVICE_FILE_SYSTEM_DRIVER -> 0x00000002
             public const int SERVICE_FILE_SYSTEM_DRIVER = 2;
@@ -606,7 +590,7 @@ class ServicesManager
             public const int SERVICE_INTERACTIVE_PROCESS = 256;
 
 
-            // SERVICE_STATUS > dwCurrentState
+            // ServiceStatus > dwCurrentState
 
             /// SERVICE_CONTINUE_PENDING -> 0x00000005
             public const int SERVICE_CONTINUE_PENDING = 5;
@@ -624,7 +608,7 @@ class ServicesManager
             public const int SERVICE_STOPPED = 1;
 
 
-            // SERVICE_STATUS > dwControlsAccepted
+            // ServiceStatus > dwControlsAccepted
 
             /// SERVICE_ACCEPT_NETBINDCHANGE -> 0x00000010
             public const int SERVICE_ACCEPT_NETBINDCHANGE = 16;
