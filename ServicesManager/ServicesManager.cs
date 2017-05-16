@@ -14,10 +14,13 @@ class ServicesManager
         // Use the service name and *NOT* the display name.
         ServiceProperties props = GetServiceProperties("Dnscache");
         PrintServiceProperties(props);
-
     }
 
     static public ServiceProperties GetServiceProperties(string serviceName) {
+
+        UInt32 dwBytesNeeded;
+        string errMsg;
+
         IntPtr databaseHandle = OpenSCManager(
             null,
             null,
@@ -33,11 +36,9 @@ class ServicesManager
             serviceName,
             NativeConstants.Service.SERVICE_ALL_ACCESS);
         if (serviceHandle == IntPtr.Zero) {
-            throw new ExternalException("Unable to OpenService '" + serviceName + "'");
+            Cleanup(databaseHandle, IntPtr.Zero, out errMsg);
+            throw new ExternalException("Unable to OpenService '" + serviceName + "':" + errMsg);
         }
-
-        UInt32 dwBytesNeeded;
-        string errMsg;
 
         // Take basic info. Everything is taken into account except the
         // delayed autostart.
@@ -213,8 +214,13 @@ class ServicesManager
         out string errMsg) {
 
         int errCode = Marshal.GetLastWin32Error();
-        CloseServiceHandle(serviceHandle);
-        CloseServiceHandle(databaseHandle);
+        if (serviceHandle != IntPtr.Zero) {
+            CloseServiceHandle(serviceHandle);
+        }
+
+        if (databaseHandle != IntPtr.Zero) {
+            CloseServiceHandle(databaseHandle);
+        }
         switch (errCode) {
             case NativeConstants.SystemErrorCode.ERROR_ACCESS_DENIED:
                 errMsg = "ERROR_ACCESS_DENIED";
@@ -224,6 +230,12 @@ class ServicesManager
                 break;
             case NativeConstants.SystemErrorCode.ERROR_INVALID_HANDLE:
                 errMsg = "ERROR_INVALID_HANDLE";
+                break;
+            case NativeConstants.SystemErrorCode.ERROR_INVALID_NAME:
+                errMsg = "ERROR_INVALID_NAME";
+                break;
+            case NativeConstants.SystemErrorCode.ERROR_SERVICE_DOES_NOT_EXIST:
+                errMsg = "ERROR_SERVICE_DOES_NOT_EXIST";
                 break;
             default:
                 errMsg = errCode.ToString();
@@ -238,8 +250,8 @@ class ServicesManager
 
         public String Name { get; set; }
         public String DisplayName { get; set; }
-        public ServiceControllerStatus Status { get; set; }
         public ServiceStartMode StartMode { get; set; }
+        public ServiceControllerStatus Status { get; set; }
     }
     
     public class QueryServiceConfigClass {
