@@ -1,14 +1,13 @@
 ﻿using System;
 using System.Runtime.InteropServices;
-
+using System.Collections.Generic;
 
 // This project must target the .NET 4 framework Client Profile for
 // compatibility with choco (Posh 2 and Windows 7).
 // To learn the differences between the full framework and the Client Profile:
 // http://stackoverflow.com/a/2786831/3514658
 
-class ServicesManager
-{
+class ServicesManager {
     
     static void Main(string[] args) {
         // Use the service name and *NOT* the display name.
@@ -21,6 +20,7 @@ class ServicesManager
 
         UInt32 dwBytesNeeded;
         string errMsg;
+        bool success;
 
         IntPtr databaseHandle = OpenSCManager(
             null,
@@ -48,101 +48,133 @@ class ServicesManager
         // before entering the function, while 'out' tells the compiler that the
         // object will be initialized inside the function.
         // src.: http://stackoverflow.com/a/388467/3514658
-        // Determine the buffer size needed (dwBytesNeeded).
-        if (!QueryServiceConfig(
-                serviceHandle,
-                IntPtr.Zero,
-                0,
-                out dwBytesNeeded)) {
 
-            if (Marshal.GetLastWin32Error() != NativeConstants.SystemErrorCode.ERROR_INSUFFICIENT_BUFFER) {
+        // Determine the buffer size needed (dwBytesNeeded).
+        success = QueryServiceConfig(serviceHandle, IntPtr.Zero, 0, out dwBytesNeeded);
+        if (!success && Marshal.GetLastWin32Error() != NativeConstants.SystemErrorCode.ERROR_INSUFFICIENT_BUFFER) {
                 Cleanup(databaseHandle, serviceHandle, out errMsg);
                 throw new ExternalException("Unable to get service config for '" + serviceName + "': " + errMsg);
-            }
         }
 
         // Get the main info of the service. See this struct for more info:
         // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684950(v=vs.85).aspx
         IntPtr ptr = Marshal.AllocHGlobal((int)dwBytesNeeded);
-        if (!QueryServiceConfig(
-                serviceHandle,
-                ptr,
-                dwBytesNeeded,
-                out dwBytesNeeded)) {
-
+        success = QueryServiceConfig(serviceHandle, ptr, dwBytesNeeded, out dwBytesNeeded);
+        if (!success) {
+            Marshal.FreeHGlobal(ptr);
             Cleanup(databaseHandle, serviceHandle, out errMsg);
             throw new ExternalException("Unable to get service config for '" + serviceName + "': " + errMsg);
         }
+        // Copy memory to serviceConfig.
         QUERY_SERVICE_CONFIG serviceConfig = new QUERY_SERVICE_CONFIG();
         Marshal.PtrToStructure(ptr, serviceConfig);
         Marshal.FreeHGlobal(ptr);
 
-        // Determine the buffer size needed (dwBytesNeeded).
-        if (!QueryServiceConfig2(
+        ServiceProperties props = new ServiceProperties();
+        props.ServiceConfig.QUERY_SERVICE_CONFIG = serviceConfig;
+
+        // Get all possible infos
+        List<uint> infoLevels = new List<uint>();
+        infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO);
+        infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_DESCRIPTION);
+        infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_FAILURE_ACTIONS);
+        infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_FAILURE_ACTIONS_FLAG);
+        infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_PREFERRED_NODE);
+        infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_PRESHUTDOWN_INFO);
+        infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO);
+        infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_SERVICE_SID_INFO);
+        infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_TRIGGER_INFO);
+        infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_LAUNCH_PROTECTED);
+        for (int i = 0; i < infoLevels.Count; i++) {
+
+            // Determine the buffer size needed (dwBytesNeeded).
+            success = QueryServiceConfig2(
                 serviceHandle,
-                NativeConstants.Service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+                infoLevels[i],
                 IntPtr.Zero,
                 0,
-                out dwBytesNeeded)) {
+                out dwBytesNeeded);
+            if (!success && Marshal.GetLastWin32Error() != NativeConstants.SystemErrorCode.ERROR_INSUFFICIENT_BUFFER) {
+                continue;
+            }
 
-            if (Marshal.GetLastWin32Error() != NativeConstants.SystemErrorCode.ERROR_INSUFFICIENT_BUFFER) {
+            // Get the info if the service is set in delayed mode or not.
+            ptr = Marshal.AllocHGlobal((int)dwBytesNeeded);
+            success = QueryServiceConfig2(
+                    serviceHandle,
+                    infoLevels[i],
+                    ptr,
+                    dwBytesNeeded,
+                    out dwBytesNeeded);
+            if (!success) {
+                Marshal.FreeHGlobal(ptr);
                 Cleanup(databaseHandle, serviceHandle, out errMsg);
                 throw new ExternalException("Unable to get service delayed auto start property for '" + serviceName + "': " + errMsg);
-            }            
+            }
+
+            // While we could use introspection to be able to take on the fly
+            // the appropriate class to instanciate, we should avoid this as
+            // instrospection is a costly process.
+            switch (infoLevels[i]) {
+                case NativeConstants.Service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO:
+                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_DELAYED_AUTO_START_INFO);
+                    break;
+
+                case NativeConstants.Service.SERVICE_CONFIG_DESCRIPTION:
+                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_DESCRIPTION);
+                    break;
+
+                case NativeConstants.Service.SERVICE_CONFIG_FAILURE_ACTIONS:
+                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_FAILURE_ACTIONS);
+                    break;
+
+                case NativeConstants.Service.SERVICE_CONFIG_FAILURE_ACTIONS_FLAG:
+                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_FAILURE_ACTIONS_FLAG);
+                    break;
+
+                case NativeConstants.Service.SERVICE_CONFIG_PREFERRED_NODE:
+                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_PREFERRED_NODE_INFO);
+                    break;
+
+                case NativeConstants.Service.SERVICE_CONFIG_PRESHUTDOWN_INFO:
+                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_PRESHUTDOWN_INFO);
+                    break;
+
+                case NativeConstants.Service.SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO:
+                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_REQUIRED_PRIVILEGES_INFO);
+                    break;
+
+                case NativeConstants.Service.SERVICE_CONFIG_SERVICE_SID_INFO:
+                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_SID_INFO);
+                    break;
+
+                case NativeConstants.Service.SERVICE_CONFIG_TRIGGER_INFO:
+                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_TRIGGER_INFO);
+                    break;
+
+                case NativeConstants.Service.SERVICE_CONFIG_LAUNCH_PROTECTED:
+                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_LAUNCH_PROTECTED_INFO);
+                    break;
+            }
+            Marshal.FreeHGlobal(ptr);
         }
 
-        // Get the info if the service is set in delayed mode or not.
-        ptr = Marshal.AllocHGlobal((int)dwBytesNeeded);
-        if (!QueryServiceConfig2(
+        SERVICE_STATUS serviceStatus = new SERVICE_STATUS();
+        success = QueryServiceStatus(
                 serviceHandle,
-                NativeConstants.Service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
-                ptr,
-                dwBytesNeeded,
-                out dwBytesNeeded)) {
-
-            Cleanup(databaseHandle, serviceHandle, out errMsg);
-            throw new ExternalException("Unable to get service delayed auto start property for '" + serviceName + "': " + errMsg);
-        }
-        ServiceDelayedAutoStartInfo serviceDelayed = new ServiceDelayedAutoStartInfo();
-        Marshal.PtrToStructure(ptr, serviceDelayed);
-        Marshal.FreeHGlobal(ptr);
-
-        ServiceStatus serviceStatus = new ServiceStatus();
-        if (!QueryServiceStatus(
-                serviceHandle,
-                out serviceStatus)) {
+                out serviceStatus);
+        if (!success) {
             Cleanup(databaseHandle, serviceHandle, out errMsg);
             throw new ExternalException("Unable to get service status for '" + serviceName + "': " + errMsg);
         }
-
-        ServiceProperties props = new ServiceProperties();
-
-        props.QueryServiceConfig.lpServiceConfig.dwServiceType = serviceConfig.dwServiceType;
-        props.QueryServiceConfig.lpServiceConfig.dwStartType = serviceConfig.dwStartType;
-        props.QueryServiceConfig.lpServiceConfig.dwErrorControl = serviceConfig.dwErrorControl;
-        props.QueryServiceConfig.lpServiceConfig.lpBinaryPathName = serviceConfig.lpBinaryPathName;
-        props.QueryServiceConfig.lpServiceConfig.lpLoadOrderGroup = serviceConfig.lpLoadOrderGroup;
-        props.QueryServiceConfig.lpServiceConfig.dwTagId = serviceConfig.dwTagId;
-        props.QueryServiceConfig.lpServiceConfig.lpDependencies = serviceConfig.lpDependencies;
-        props.QueryServiceConfig.lpServiceConfig.lpServiceStartName = serviceConfig.lpServiceStartName;
-        props.QueryServiceConfig.lpServiceConfig.lpDisplayName = serviceConfig.lpDisplayName;
-
-        props.QueryServiceConfig2.lpBuffer.SERVICE_DELAYED_AUTO_START_INFO.fDelayedAutostart = serviceDelayed.fDelayedAutostart;
-
-        props.QueryServiceStatus.lpServiceStatus.dwServiceType = serviceStatus.dwServiceType;
-        props.QueryServiceStatus.lpServiceStatus.dwCurrentState = serviceStatus.dwCurrentState;
-        props.QueryServiceStatus.lpServiceStatus.dwControlsAccepted = serviceStatus.dwControlsAccepted;
-        props.QueryServiceStatus.lpServiceStatus.dwWin32ExitCode = serviceStatus.dwWin32ExitCode;
-        props.QueryServiceStatus.lpServiceStatus.dwServiceSpecificExitCode = serviceStatus.dwServiceSpecificExitCode;
-        props.QueryServiceStatus.lpServiceStatus.dwCheckPoint = serviceStatus.dwCheckPoint;
-        props.QueryServiceStatus.lpServiceStatus.dwWaitHint = serviceStatus.dwWaitHint;
+        props.ServiceStatus.SERVICE_STATUS = serviceStatus;
 
         props.Name = serviceName;
         props.DisplayName = serviceConfig.lpDisplayName;
 
         switch (serviceConfig.dwStartType) {
             case NativeConstants.Service.SERVICE_AUTO_START:
-                if (serviceDelayed.fDelayedAutostart) {
+                if (props.ServiceConfig2.SERVICE_DELAYED_AUTO_START_INFO.fDelayedAutostart) {
                     props.StartMode = ServiceStartMode.AutomaticDelayed;
                 }
                 else {
@@ -231,13 +263,13 @@ class ServicesManager
 
         // Change service startType config
         Int32 dwStartType;
-        SERVICE_DELAYED_AUTO_START_INFO delayed =
+        SERVICE_DELAYED_AUTO_START_INFO DelayedInfo =
             new SERVICE_DELAYED_AUTO_START_INFO();
-        delayed.fDelayedAutostart = false;
+        DelayedInfo.fDelayedAutostart = false;
         switch (startMode) {
             case ServiceStartMode.AutomaticDelayed:
                 dwStartType = NativeConstants.Service.SERVICE_AUTO_START;
-                delayed.fDelayedAutostart = true;
+                DelayedInfo.fDelayedAutostart = true;
                 break;
             case ServiceStartMode.Automatic:
                 dwStartType = NativeConstants.Service.SERVICE_AUTO_START;
@@ -287,21 +319,21 @@ class ServicesManager
             throw new ExternalException("Unable to change configuration for service '" + serviceName + "':" + errMsg);
         }
 
-        IntPtr unmanagedAddr = Marshal.AllocHGlobal(Marshal.SizeOf(delayed));
-        Marshal.StructureToPtr(delayed, unmanagedAddr, true);
+        IntPtr pDelayedInfo = Marshal.AllocHGlobal(Marshal.SizeOf(DelayedInfo));
+        Marshal.StructureToPtr(DelayedInfo, pDelayedInfo, true);
 
         if (!ChangeServiceConfig2(
                 serviceHandle,
                 NativeConstants.Service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
-                unmanagedAddr)) {
+                pDelayedInfo)) {
             Cleanup(databaseHandle, serviceHandle, out errMsg);
-            Marshal.FreeHGlobal(unmanagedAddr);
-            unmanagedAddr = IntPtr.Zero;
+            Marshal.FreeHGlobal(pDelayedInfo);
+            pDelayedInfo = IntPtr.Zero;
             throw new ExternalException("Unable to change configuration for service '" + serviceName + "':" + errMsg);
         }
 
-        Marshal.FreeHGlobal(unmanagedAddr);
-        unmanagedAddr = IntPtr.Zero;
+        Marshal.FreeHGlobal(pDelayedInfo);
+        pDelayedInfo = IntPtr.Zero;
 
         // If the user wants to start the service
         if (status == ServiceControllerStatus.Running ||
@@ -320,6 +352,10 @@ class ServicesManager
         Console.WriteLine("DisplayName: '" + props.DisplayName + "'");
         Console.WriteLine("StartMode: '" + props.StartMode + "'");
         Console.WriteLine("Status: '" + props.Status + "'");
+        Console.WriteLine("lpDisplayName: '" + props.ServiceConfig.QUERY_SERVICE_CONFIG.lpDisplayName + "'");
+        Console.WriteLine("lpDisplayName: '" + props.ServiceConfig.QUERY_SERVICE_CONFIG.lpDisplayName + "'");
+        Console.WriteLine("lpDescription: '" + props.ServiceConfig2.SERVICE_DESCRIPTION.lpDescription + "'");
+        Console.WriteLine("dwServiceSidType: '" + props.ServiceConfig2.SERVICE_SID_INFO.dwServiceSidType + "'");
         Console.ReadLine();
     }
 
@@ -379,56 +415,35 @@ class ServicesManager
     }
 
    public class ServiceProperties {
-        public QueryServiceConfigClass QueryServiceConfig = new QueryServiceConfigClass();
-        public QueryServiceConfig2Class QueryServiceConfig2 = new QueryServiceConfig2Class();
-        public QueryServiceStatusClass QueryServiceStatus = new QueryServiceStatusClass();
+        public ServiceConfig ServiceConfig = new ServiceConfig();
+        public ServiceConfig2 ServiceConfig2 = new ServiceConfig2();
+        public ServiceStatus ServiceStatus = new ServiceStatus();
 
-        public String Name { get; set; }
-        public String DisplayName { get; set; }
-        public ServiceStartMode StartMode { get; set; }
-        public ServiceControllerStatus Status { get; set; }
-    }
-    
-    public class QueryServiceConfigClass {
-        public ServiceConfigClass lpServiceConfig = new ServiceConfigClass();
+        public String Name;
+        public String DisplayName;
+        public ServiceStartMode StartMode;
+        public ServiceControllerStatus Status;
     }
 
-    public class ServiceConfigClass {
-        // From the struct QUERY_SERVICE_CONFIG
-        // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684950(v=vs.85).aspx
-        // used by the function QueryServiceConfig()
-        // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684932(v=vs.85).aspx
-        public uint dwServiceType { get; set; }
-        public uint dwStartType { get; set; }
-        public uint dwErrorControl { get; set; }
-        public string lpBinaryPathName { get; set; }
-        public string lpLoadOrderGroup { get; set; }
-        public uint dwTagId { get; set; }
-        public string lpDependencies { get; set; }
-        public string lpServiceStartName { get; set; }
-        public string lpDisplayName { get; set; }
+    public class ServiceConfig {
+        public QUERY_SERVICE_CONFIG QUERY_SERVICE_CONFIG = new QUERY_SERVICE_CONFIG();
     }
 
-    public class QueryServiceConfig2Class {
-        public ServiceConfig2Class lpBuffer = new ServiceConfig2Class();
-    }
-
-    public class ServiceConfig2Class {
+    public class ServiceConfig2 {
         public SERVICE_DELAYED_AUTO_START_INFO SERVICE_DELAYED_AUTO_START_INFO = new SERVICE_DELAYED_AUTO_START_INFO();
+        public SERVICE_DESCRIPTION SERVICE_DESCRIPTION = new SERVICE_DESCRIPTION();
+        public SERVICE_FAILURE_ACTIONS SERVICE_FAILURE_ACTIONS = new SERVICE_FAILURE_ACTIONS();
+        public SERVICE_FAILURE_ACTIONS_FLAG SERVICE_FAILURE_ACTIONS_FLAG = new SERVICE_FAILURE_ACTIONS_FLAG();
+        public SERVICE_PREFERRED_NODE_INFO SERVICE_PREFERRED_NODE_INFO = new SERVICE_PREFERRED_NODE_INFO();
+        public SERVICE_PRESHUTDOWN_INFO SERVICE_PRESHUTDOWN_INFO = new SERVICE_PRESHUTDOWN_INFO();
+        public SERVICE_REQUIRED_PRIVILEGES_INFO SERVICE_REQUIRED_PRIVILEGES_INFO = new SERVICE_REQUIRED_PRIVILEGES_INFO();
+        public SERVICE_SID_INFO SERVICE_SID_INFO = new SERVICE_SID_INFO();
+        public SERVICE_TRIGGER_INFO SERVICE_TRIGGER_INFO = new SERVICE_TRIGGER_INFO();
+        public SERVICE_LAUNCH_PROTECTED_INFO SERVICE_LAUNCH_PROTECTED_INFO = new SERVICE_LAUNCH_PROTECTED_INFO();
     }
 
-    // From the struct SERVICE_DELAYED_AUTO_START_INFO 
-    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685155(v=vs.85).aspx
-    // used by the function QueryServiceConfig2()
-    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684935(v=vs.85).aspx
-    [StructLayout(LayoutKind.Explicit)]
-    public struct SERVICE_DELAYED_AUTO_START_INFO {
-        [FieldOffset(0)]
-        public bool fDelayedAutostart;
-    }
-
-    public class QueryServiceStatusClass {
-        public ServiceStatus lpServiceStatus = new ServiceStatus();
+    public class ServiceStatus {
+        public SERVICE_STATUS SERVICE_STATUS = new SERVICE_STATUS();
     }
 
     // Based on System.ServiceProcess.ServiceControllerStatus
@@ -465,7 +480,14 @@ class ServicesManager
         System = NativeConstants.Service.SERVICE_SYSTEM_START
     }
 
-    #region P/Invoke declarations
+    #region P/Invoke structures
+
+    // P/Invoke Interop Assistant 1.0 is useful to generate declarations of
+    // native code constant in their managed counterparts.
+    // http://stackoverflow.com/a/5122534/3514658
+    // From the struct QUERY_SERVICE_CONFIG used by the function
+    // QueryServiceConfig()
+    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684950(v=vs.85).aspx
 
     // The LayoutKind.Sequential specifies that the fields of the type should
     // be laid out in memory in the same order they are declared in your
@@ -473,16 +495,76 @@ class ServicesManager
     // code. Without the attribute the CLR is free to optimize memory use
     // by rearranging the fields.
     // src.: https://social.msdn.microsoft.com/Forums/vstudio/en-US/2abc6be8-c593-4686-93d2-89785232dacd#0455ea02-7eab-451b-8a83-fbfc4384d654
+    [StructLayoutAttribute(LayoutKind.Sequential)]
+    public class QUERY_SERVICE_CONFIG {
+        /// DWORD->unsigned int
+        public uint dwServiceType;
+        /// DWORD->unsigned int
+        public uint dwStartType;
+        /// DWORD->unsigned int
+        public uint dwErrorControl;
+        /// LPWSTR->WCHAR*
+        [MarshalAsAttribute(UnmanagedType.LPWStr)]
+        public string lpBinaryPathName;
+        /// LPWSTR->WCHAR*
+        [MarshalAsAttribute(UnmanagedType.LPWStr)]
+        public string lpLoadOrderGroup;
+        /// DWORD->unsigned int
+        public uint dwTagId;
+        /// LPWSTR->WCHAR*
+        [MarshalAsAttribute(UnmanagedType.LPWStr)]
+        public string lpDependencies;
+        /// LPWSTR->WCHAR*
+        [MarshalAsAttribute(UnmanagedType.LPWStr)]
+        public string lpServiceStartName;
+        /// LPWSTR->WCHAR*
+        [MarshalAsAttribute(UnmanagedType.LPWStr)]
+        public string lpDisplayName;
+    }
+
+    // From the struct ServiceStatus
+    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685996(v=vs.85).aspx
+    // used by the function QueryServiceStatus()
+    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684939(v=vs.85).aspx
+    [StructLayoutAttribute(LayoutKind.Sequential)]
+    // Must be a struct otherwise QueryServiceStatus complains the memory
+    // is corrupted.
+    public struct SERVICE_STATUS {
+        /// DWORD->unsigned int
+        public uint dwServiceType;
+        /// DWORD->unsigned int
+        public uint dwCurrentState;
+        /// DWORD->unsigned int
+        public uint dwControlsAccepted;
+        /// DWORD->unsigned int
+        public uint dwWin32ExitCode;
+        /// DWORD->unsigned int
+        public uint dwServiceSpecificExitCode;
+        /// DWORD->unsigned int
+        public uint dwCheckPoint;
+        /// DWORD->unsigned int
+        public uint dwWaitHint;
+    }
+
+    // From the struct SERVICE_DELAYED_AUTO_START_INFO
+    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685155(v=vs.85).aspx
+    // used by the function QueryServiceConfig2()
+    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684935(v=vs.85).aspx
+    [StructLayout(LayoutKind.Explicit)]
+    public class SERVICE_DELAYED_AUTO_START_INFO {
+        [FieldOffset(0)]
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool fDelayedAutostart;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
-    public class SERVICE_DESCRIPTION
-    {
+    public class SERVICE_DESCRIPTION {
         [MarshalAs(UnmanagedType.LPWStr)]
         public String lpDescription;
     }
-    
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    public class SERVICE_FAILURE_ACTIONS
-    {
+    public class SERVICE_FAILURE_ACTIONS {
         public int dwResetPeriod;
         [MarshalAs(UnmanagedType.LPWStr)]
         public string lpRebootMsg;
@@ -493,79 +575,61 @@ class ServicesManager
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public class SC_ACTION
-    {
+    public class SC_ACTION {
         public Int32 type;
         public UInt32 dwDelay;
     }
 
-    // P/Invoke Interop Assistant 1.0 is useful to generate declarations of
-    // native code constant in their managed counterparts.
-    // http://stackoverflow.com/a/5122534/3514658
-    [StructLayoutAttribute(LayoutKind.Sequential)]
-    public class QUERY_SERVICE_CONFIG
-    {
-        /// DWORD->unsigned int
-        public uint dwServiceType;
-
-        /// DWORD->unsigned int
-        public uint dwStartType;
-
-        /// DWORD->unsigned int
-        public uint dwErrorControl;
-
-        /// LPWSTR->WCHAR*
-        [MarshalAsAttribute(UnmanagedType.LPWStr)]
-        public string lpBinaryPathName;
-
-        /// LPWSTR->WCHAR*
-        [MarshalAsAttribute(UnmanagedType.LPWStr)]
-        public string lpLoadOrderGroup;
-
-        /// DWORD->unsigned int
-        public uint dwTagId;
-
-        /// LPWSTR->WCHAR*
-        [MarshalAsAttribute(UnmanagedType.LPWStr)]
-        public string lpDependencies;
-
-        /// LPWSTR->WCHAR*
-        [MarshalAsAttribute(UnmanagedType.LPWStr)]
-        public string lpServiceStartName;
-
-        /// LPWSTR->WCHAR*
-        [MarshalAsAttribute(UnmanagedType.LPWStr)]
-        public string lpDisplayName;
+    [StructLayout(LayoutKind.Sequential)]
+    public class SERVICE_FAILURE_ACTIONS_FLAG {
+        public bool fFailureActionsOnNonCrashFailures;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public class ServiceDelayedAutoStartInfo {
-        [MarshalAs(UnmanagedType.Bool)]
-        public bool fDelayedAutostart;
+    public class SERVICE_PREFERRED_NODE_INFO {
+        public ushort usPreferredNode;
+        public bool fDelete;
     }
 
-    // From the struct ServiceStatus
-    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685996(v=vs.85).aspx
-    // used by the function QueryServiceStatus()
-    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684939(v=vs.85).aspx
-    [StructLayoutAttribute(LayoutKind.Sequential)]
-    public struct ServiceStatus {
-
-        /// DWORD->unsigned int
-        public uint dwServiceType { get; set; }
-        /// DWORD->unsigned int
-        public uint dwCurrentState { get; set; }
-        /// DWORD->unsigned int
-        public uint dwControlsAccepted { get; set; }
-        /// DWORD->unsigned int
-        public uint dwWin32ExitCode { get; set; }
-        /// DWORD->unsigned int
-        public uint dwServiceSpecificExitCode { get; set; }
-        /// DWORD->unsigned int
-        public uint dwCheckPoint { get; set; }
-        /// DWORD->unsigned int
-        public uint dwWaitHint { get; set; }
+    [StructLayout(LayoutKind.Sequential)]
+    public class SERVICE_PRESHUTDOWN_INFO {
+        public uint dwPreshutdownTimeout;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public class SERVICE_REQUIRED_PRIVILEGES_INFO {
+        public string pmszRequiredPrivileges;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public class SERVICE_SID_INFO {
+        public uint dwServiceSidType;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public class SERVICE_TRIGGER_INFO {
+        public int cTriggers;
+        public IntPtr pTriggers;
+        public IntPtr pReserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public class PSERVICE_TRIGGER {
+        public uint dwTriggerType;
+        public uint dwAction;
+        public IntPtr pTriggerSubtype;
+        public uint cDataItems;
+        public IntPtr pDataItems;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public class SERVICE_LAUNCH_PROTECTED_INFO {
+        public uint dwLaunchProtected;
+    }
+
+    #endregion P/Invoke structures
+
+    #region P/Invoke functions
 
     // Some import statements are inspired from some public solutions from
     // Pinvoke.net.
@@ -592,7 +656,7 @@ class ServicesManager
     public static extern bool QueryServiceConfig2(IntPtr hService, UInt32 dwInfoLevel, IntPtr buffer, UInt32 cbBufSize, out UInt32 pcbBytesNeeded);
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "QueryServiceStatus")]
-    public static extern bool QueryServiceStatus(IntPtr hService, out ServiceStatus lpServiceStatus);
+    public static extern bool QueryServiceStatus(IntPtr hService, out SERVICE_STATUS lpServiceStatus);
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "ChangeServiceConfigW")]
     public static extern bool ChangeServiceConfig(
@@ -613,6 +677,10 @@ class ServicesManager
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CloseServiceHandle")]
     public static extern bool CloseServiceHandle(IntPtr hSCObject);
+
+    #endregion P/Invoke functions
+
+    #region P/Invoke error codes
 
     public partial class NativeConstants {
 
@@ -841,7 +909,23 @@ class ServicesManager
             // Parameters used by QueryServiceConfig2()
             // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684935(v=vs.85).aspx
             public const int SERVICE_CONFIG_DELAYED_AUTO_START_INFO = 3;
+            public const int SERVICE_CONFIG_DESCRIPTION = 1;
+            public const int SERVICE_CONFIG_FAILURE_ACTIONS = 2;
+            public const int SERVICE_CONFIG_FAILURE_ACTIONS_FLAG = 4;
+            public const int SERVICE_CONFIG_PREFERRED_NODE = 9;
+            public const int SERVICE_CONFIG_PRESHUTDOWN_INFO = 7;
+            public const int SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO = 6;
+            public const int SERVICE_CONFIG_SERVICE_SID_INFO = 5;
+            public const int SERVICE_CONFIG_TRIGGER_INFO = 8;
+            public const int SERVICE_CONFIG_LAUNCH_PROTECTED = 12;
 
+            // QueryServiceConfig2 > SERVICE_SID_INFO
+            /// SERVICE_SID_INFO -> 0x00000000
+            public const int SERVICE_SID_TYPE_NONE = 0;
+            /// SERVICE_SID_TYPE_RESTRICTED -> 0x00000003
+            public const int SERVICE_SID_TYPE_RESTRICTED = 3;
+            /// SERVICE_SID_TYPE_UNRESTRICTED -> 0x00000001
+            public const int SERVICE_SID_TYPE_UNRESTRICTED = 1;
 
             // ChangeServiceConfig > hService
             // + SERVICE_CHANGE_CONFIG
@@ -872,5 +956,5 @@ class ServicesManager
         }
     }
 
-    #endregion // P/Invoke declarations
+    #endregion P/Invoke error codes
 }
