@@ -14,6 +14,7 @@ class ServicesManager
         // Use the service name and *NOT* the display name.
         ServiceProperties props = GetServiceProperties("Dnscache");
         PrintServiceProperties(props);
+        SetServiceProperties("OpenVPNService", ServiceControllerStatus.Running, ServiceStartMode.AutomaticDelayed);
     }
 
     static public ServiceProperties GetServiceProperties(string serviceName) {
@@ -44,7 +45,7 @@ class ServicesManager
         // delayed autostart.
         //
         // The 'ref' keyword tells the compiler that the object is initialized
-        // before entering the function, while out tells the compiler that the
+        // before entering the function, while 'out' tells the compiler that the
         // object will be initialized inside the function.
         // src.: http://stackoverflow.com/a/388467/3514658
         // Determine the buffer size needed (dwBytesNeeded).
@@ -200,6 +201,120 @@ class ServicesManager
         return props;
     }
 
+    static public void SetServiceProperties(
+        string serviceName,
+        ServiceControllerStatus status,
+        ServiceStartMode startMode) {
+
+        ServiceProperties props = GetServiceProperties(serviceName);
+
+        string errMsg;
+
+        IntPtr databaseHandle = OpenSCManager(
+            null,
+            null,
+            NativeConstants.ServiceControlManager.SC_MANAGER_ALL_ACCESS);
+        // An error might happen here if we are not running as administrator and the service
+        // database is locked.
+        if (databaseHandle == IntPtr.Zero) {
+            throw new ExternalException("Unable to OpenSCManager. Not enough rights.");
+        }
+
+        IntPtr serviceHandle = OpenService(
+            databaseHandle,
+            serviceName,
+            NativeConstants.Service.SERVICE_ALL_ACCESS);
+        if (serviceHandle == IntPtr.Zero) {
+            Cleanup(databaseHandle, IntPtr.Zero, out errMsg);
+            throw new ExternalException("Unable to OpenService '" + serviceName + "':" + errMsg);
+        }
+
+        // Change service startType config
+        Int32 dwStartType;
+        SERVICE_DELAYED_AUTO_START_INFO delayed =
+            new SERVICE_DELAYED_AUTO_START_INFO();
+        delayed.fDelayedAutostart = false;
+        switch (startMode) {
+            case ServiceStartMode.AutomaticDelayed:
+                dwStartType = NativeConstants.Service.SERVICE_AUTO_START;
+                delayed.fDelayedAutostart = true;
+                break;
+            case ServiceStartMode.Automatic:
+                dwStartType = NativeConstants.Service.SERVICE_AUTO_START;
+                break;
+            case ServiceStartMode.Boot:
+                dwStartType = NativeConstants.Service.SERVICE_BOOT_START;
+                break;
+            case ServiceStartMode.Disabled:
+                dwStartType = NativeConstants.Service.SERVICE_DISABLED;
+                break;
+            case ServiceStartMode.Manual:
+                dwStartType = NativeConstants.Service.SERVICE_DEMAND_START;
+                break;
+            case ServiceStartMode.System:
+                dwStartType = NativeConstants.Service.SERVICE_SYSTEM_START;
+                break;
+            default:
+                CloseServiceHandle(databaseHandle);
+                CloseServiceHandle(serviceHandle);
+                throw new ExternalException("The service '" + serviceName + "' has an invalid start type");
+        }
+
+        if (!ChangeServiceConfig(
+                // handle of service
+                serviceHandle,
+                // service type: no change
+                NativeConstants.Service.SERVICE_NO_CHANGE,
+                // service start type
+                dwStartType,
+                // error control: no change
+                NativeConstants.Service.SERVICE_NO_CHANGE,
+                // binary path: no change
+                IntPtr.Zero,
+                // load order group: no change
+                IntPtr.Zero,
+                // tag ID: no change
+                IntPtr.Zero,
+                // dependencies: no change
+                IntPtr.Zero,
+                // account name: no change
+                IntPtr.Zero,
+                // password: no change
+                IntPtr.Zero,
+                // display name: no change
+                IntPtr.Zero)) {
+            Cleanup(databaseHandle, serviceHandle, out errMsg);
+            throw new ExternalException("Unable to change configuration for service '" + serviceName + "':" + errMsg);
+        }
+
+        IntPtr unmanagedAddr = Marshal.AllocHGlobal(Marshal.SizeOf(delayed));
+        Marshal.StructureToPtr(delayed, unmanagedAddr, true);
+
+        if (!ChangeServiceConfig2(
+                serviceHandle,
+                NativeConstants.Service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+                unmanagedAddr)) {
+            Cleanup(databaseHandle, serviceHandle, out errMsg);
+            Marshal.FreeHGlobal(unmanagedAddr);
+            unmanagedAddr = IntPtr.Zero;
+            throw new ExternalException("Unable to change configuration for service '" + serviceName + "':" + errMsg);
+        }
+
+        Marshal.FreeHGlobal(unmanagedAddr);
+        unmanagedAddr = IntPtr.Zero;
+
+        // If the user wants to start the service
+        if (status == ServiceControllerStatus.Running ||
+            status == ServiceControllerStatus.StartPending) {
+
+            // Try to start the service, only if it is not already started
+            if (props.Status == ServiceControllerStatus.Stopped ||
+                props.Status == ServiceControllerStatus.StopPending) {
+
+            }
+        }
+    }
+
     static private void PrintServiceProperties(ServiceProperties props) {
         
         Console.WriteLine("DisplayName: '" + props.DisplayName + "'");
@@ -221,6 +336,11 @@ class ServicesManager
         if (databaseHandle != IntPtr.Zero) {
             CloseServiceHandle(databaseHandle);
         }
+        // We can't get the capitalized error constant programatically. This
+        // piss of code is thus needed. Otherwise we need to load a file
+        // containing all Win32 error constants.
+        // src.: https://stackoverflow.com/a/30204142/3514658
+        // src.: http://pinvoke.net/default.aspx/Constants/WINERROR.html
         switch (errCode) {
             case NativeConstants.SystemErrorCode.ERROR_ACCESS_DENIED:
                 errMsg = "ERROR_ACCESS_DENIED";
@@ -236,6 +356,21 @@ class ServicesManager
                 break;
             case NativeConstants.SystemErrorCode.ERROR_SERVICE_DOES_NOT_EXIST:
                 errMsg = "ERROR_SERVICE_DOES_NOT_EXIST";
+                break;
+            case NativeConstants.SystemErrorCode.ERROR_CIRCULAR_DEPENDENCY:
+                errMsg = "ERROR_CIRCULAR_DEPENDENCY";
+                break;
+            case NativeConstants.SystemErrorCode.ERROR_DUPLICATE_SERVICE_NAME:
+                errMsg = "ERROR_DUPLICATE_SERVICE_NAME";
+                break;
+            case NativeConstants.SystemErrorCode.ERROR_INVALID_PARAMETER:
+                errMsg = "ERROR_INVALID_PARAMETER";
+                break;
+            case NativeConstants.SystemErrorCode.ERROR_INVALID_SERVICE_ACCOUNT:
+                errMsg = "ERROR_INVALID_SERVICE_ACCOUNT";
+                break;
+            case NativeConstants.SystemErrorCode.ERROR_SERVICE_MARKED_FOR_DELETE:
+                errMsg = "ERROR_SERVICE_MARKED_FOR_DELETE";
                 break;
             default:
                 errMsg = errCode.ToString();
@@ -279,17 +414,19 @@ class ServicesManager
     }
 
     public class ServiceConfig2Class {
-        public ServiceConfig2ServiceDelayedAutoStartInfo SERVICE_DELAYED_AUTO_START_INFO = new ServiceConfig2ServiceDelayedAutoStartInfo();
+        public SERVICE_DELAYED_AUTO_START_INFO SERVICE_DELAYED_AUTO_START_INFO = new SERVICE_DELAYED_AUTO_START_INFO();
     }
 
-    public class ServiceConfig2ServiceDelayedAutoStartInfo {
-        // From the struct SERVICE_DELAYED_AUTO_START_INFO 
-        // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685155(v=vs.85).aspx
-        // used by the function QueryServiceConfig2()
-        // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684935(v=vs.85).aspx
-        public bool fDelayedAutostart { get; set; }
+    // From the struct SERVICE_DELAYED_AUTO_START_INFO 
+    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685155(v=vs.85).aspx
+    // used by the function QueryServiceConfig2()
+    // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684935(v=vs.85).aspx
+    [StructLayout(LayoutKind.Explicit)]
+    public struct SERVICE_DELAYED_AUTO_START_INFO {
+        [FieldOffset(0)]
+        public bool fDelayedAutostart;
     }
-    
+
     public class QueryServiceStatusClass {
         public ServiceStatus lpServiceStatus = new ServiceStatus();
     }
@@ -311,7 +448,17 @@ class ServicesManager
     // but we added the AutomaticDelayed mode.
     public enum ServiceStartMode {
         Automatic = NativeConstants.Service.SERVICE_AUTO_START,
-        AutomaticDelayed,
+        // Enum numeric literals are defined at compilation time and the C#
+        // language specification doesn't prevent to have duplicate values
+        // for an enum. Here, when we weren't specifying an explicit value
+        // for AutomaticDelayed, the latter had the same value (3) as Manual.
+        // We had to specify a value not used by other fields. Another solution
+        // would be to use a class instead, but this is a bit overkill for this
+        // use case.
+        // src.: https://stackoverflow.com/a/26827597/3514658
+        // src.: https://stackoverflow.com/a/1425791/3514658
+        // src.: https://stackoverflow.com/a/26828917/3514658
+        AutomaticDelayed = 1000,
         Boot = NativeConstants.Service.SERVICE_BOOT_START,
         Disabled = NativeConstants.Service.SERVICE_DISABLED,
         Manual = NativeConstants.Service.SERVICE_DEMAND_START,
@@ -423,10 +570,15 @@ class ServicesManager
     // Some import statements are inspired from some public solutions from
     // Pinvoke.net.
     // https://webcache.googleusercontent.com/search?q=cache:4U7pz3gubesJ:www.pinvoke.net/default.aspx/advapi32.queryserviceconfig2
+    // The following page is a great use to find types equivalence between
+    // C++ et .NET types.
+    // src.: https://www.codeproject.com/Articles/9714/Win-API-C-to-NET
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr OpenSCManager(String lpMachineName, String lpDatabaseName, UInt32 dwDesiredAccess);
+
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr OpenService(IntPtr hSCManager, String lpServiceName, UInt32 dwDesiredAccess);
+
     // The EntryPoint specifies a DLL function by name or ordinal. If the name
     // of the function in our method definition is the same as the entry
     // point in the DLL, we do not have to explicitly identify the function
@@ -435,10 +587,30 @@ class ServicesManager
     // src. https://msdn.microsoft.com/en-us/library/f5xe74x8(v=vs.110).aspx#Anchor_1
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "QueryServiceConfigW")]
     public static extern bool QueryServiceConfig(IntPtr hService, IntPtr lpServiceConfig, UInt32 cbBufSize, out UInt32 pcbBytesNeeded);
+
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "QueryServiceConfig2W")]
     public static extern bool QueryServiceConfig2(IntPtr hService, UInt32 dwInfoLevel, IntPtr buffer, UInt32 cbBufSize, out UInt32 pcbBytesNeeded);
+
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "QueryServiceStatus")]
     public static extern bool QueryServiceStatus(IntPtr hService, out ServiceStatus lpServiceStatus);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "ChangeServiceConfigW")]
+    public static extern bool ChangeServiceConfig(
+        IntPtr hService,
+        Int32 dwServiceType,
+        Int32 dwStartType,
+        Int32 dwErrorControl,
+        IntPtr lpBinaryPathName,
+        IntPtr lpLoadOrderGroup,
+        IntPtr lpdwTagId,
+        IntPtr lpDependencies,
+        IntPtr lpServiceStartName,
+        IntPtr lpPassword,
+        IntPtr lpDisplayName);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "ChangeServiceConfig2W")]
+    public static extern bool ChangeServiceConfig2(IntPtr hService, UInt32 dwInfoLevel, IntPtr lpInfo);
+
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CloseServiceHandle")]
     public static extern bool CloseServiceHandle(IntPtr hSCObject);
 
@@ -484,6 +656,22 @@ class ServicesManager
             // Errors from QueryServiceStatus
             // + ERROR_ACCESS_DENIED
             // + ERROR_INVALID_HANDLE
+
+
+            // Errors from ChangeServiceConfig
+
+            // + ERROR_ACCESS_DENIED
+            /// ERROR_CIRCULAR_DEPENDENCY -> 1059L
+            public const int ERROR_CIRCULAR_DEPENDENCY = 1059;
+            /// ERROR_DUPLICATE_SERVICE_NAME -> 1078L
+            public const int ERROR_DUPLICATE_SERVICE_NAME = 1078;
+            // + ERROR_INVALID_HANDLE
+            /// ERROR_INVALID_PARAMETER -> 87L
+            public const int ERROR_INVALID_PARAMETER = 87;
+            /// ERROR_INVALID_SERVICE_ACCOUNT -> 1057L
+            public const int ERROR_INVALID_SERVICE_ACCOUNT = 1057;
+            /// ERROR_SERVICE_MARKED_FOR_DELETE -> 1072L
+            public const int ERROR_SERVICE_MARKED_FOR_DELETE = 1072;
         }
 
         public class ServiceControlManager {
@@ -653,6 +841,34 @@ class ServicesManager
             // Parameters used by QueryServiceConfig2()
             // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684935(v=vs.85).aspx
             public const int SERVICE_CONFIG_DELAYED_AUTO_START_INFO = 3;
+
+
+            // ChangeServiceConfig > hService
+            // + SERVICE_CHANGE_CONFIG
+
+            // ChangeServiceConfig > dwServiceType
+            /// SERVICE_NO_CHANGE -> 0xffffffff
+            public const int SERVICE_NO_CHANGE = -1;
+            // + SERVICE_FILE_SYSTEM_DRIVER
+            // + SERVICE_KERNEL_DRIVER
+            // + SERVICE_WIN32_OWN_PROCESS
+            // + SERVICE_WIN32_SHARE_PROCESS
+            // + SERVICE_INTERACTIVE_PROCESS
+
+            // ChangeServiceConfig > dwStartType
+            // + SERVICE_NO_CHANGE
+            // + SERVICE_AUTO_START
+            // + SERVICE_BOOT_START
+            // + SERVICE_DEMAND_START
+            // + SERVICE_DISABLED
+            // + SERVICE_SYSTEM_START
+
+            // ChangeServiceConfig > dwErrorControl
+            // + SERVICE_NO_CHANGE
+            // + SERVICE_ERROR_CRITICAL
+            // + SERVICE_ERROR_IGNORE
+            // + SERVICE_ERROR_NORMAL
+            // + SERVICE_ERROR_SEVERE
         }
     }
 
