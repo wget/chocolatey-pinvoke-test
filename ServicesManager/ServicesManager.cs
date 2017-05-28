@@ -7,19 +7,19 @@ using System.Collections.Generic;
 // To learn the differences between the full framework and the Client Profile:
 // http://stackoverflow.com/a/2786831/3514658
 
-class ServicesManager {
-    
+public class ServiceManager {
+
     static void Main(string[] args) {
         // Use the service name and *NOT* the display name.
-        ServiceProperties props = GetServiceProperties("Dnscache");
-        PrintServiceProperties(props);
-        SetServiceProperties("OpenVPNService", ServiceControllerStatus.Running, ServiceStartMode.AutomaticDelayed);
+        ServiceManager serviceManager = new ServiceManager();
+        ServiceProperties props = ServiceManager.GetServiceProperties("Dnscache");
+        ServiceManager.PrintServiceProperties(props);
+        ServiceManager.SetServiceProperties("OpenVPNService", ServiceControllerStatus.Running, ServiceStartMode.AutomaticDelayed);
     }
 
     static public ServiceProperties GetServiceProperties(string serviceName) {
 
         UInt32 dwBytesNeeded;
-        string errMsg;
         bool success;
 
         IntPtr databaseHandle = OpenSCManager(
@@ -37,7 +37,8 @@ class ServicesManager {
             serviceName,
             NativeConstants.Service.SERVICE_ALL_ACCESS);
         if (serviceHandle == IntPtr.Zero) {
-            Cleanup(databaseHandle, IntPtr.Zero, out errMsg);
+            string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
+            CloseServiceHandle(databaseHandle);
             throw new ExternalException("Unable to OpenService '" + serviceName + "':" + errMsg);
         }
 
@@ -52,8 +53,10 @@ class ServicesManager {
         // Determine the buffer size needed (dwBytesNeeded).
         success = QueryServiceConfig(serviceHandle, IntPtr.Zero, 0, out dwBytesNeeded);
         if (!success && Marshal.GetLastWin32Error() != NativeConstants.SystemErrorCode.ERROR_INSUFFICIENT_BUFFER) {
-                Cleanup(databaseHandle, serviceHandle, out errMsg);
-                throw new ExternalException("Unable to get service config for '" + serviceName + "': " + errMsg);
+            string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
+            CloseServiceHandle(serviceHandle);
+            CloseServiceHandle(databaseHandle);
+            throw new ExternalException("Unable to get service config for '" + serviceName + "': " + errMsg);
         }
 
         // Get the main info of the service. See this struct for more info:
@@ -62,7 +65,9 @@ class ServicesManager {
         success = QueryServiceConfig(serviceHandle, ptr, dwBytesNeeded, out dwBytesNeeded);
         if (!success) {
             Marshal.FreeHGlobal(ptr);
-            Cleanup(databaseHandle, serviceHandle, out errMsg);
+            string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
+            CloseServiceHandle(serviceHandle);
+            CloseServiceHandle(databaseHandle);
             throw new ExternalException("Unable to get service config for '" + serviceName + "': " + errMsg);
         }
         // Copy memory to serviceConfig.
@@ -98,7 +103,7 @@ class ServicesManager {
                 continue;
             }
 
-            // Get the info if the service is set in delayed mode or not.
+            // Get the info.
             ptr = Marshal.AllocHGlobal((int)dwBytesNeeded);
             success = QueryServiceConfig2(
                     serviceHandle,
@@ -108,7 +113,9 @@ class ServicesManager {
                     out dwBytesNeeded);
             if (!success) {
                 Marshal.FreeHGlobal(ptr);
-                Cleanup(databaseHandle, serviceHandle, out errMsg);
+                string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
+                CloseServiceHandle(serviceHandle);
+                CloseServiceHandle(databaseHandle);
                 throw new ExternalException("Unable to get service delayed auto start property for '" + serviceName + "': " + errMsg);
             }
 
@@ -160,11 +167,11 @@ class ServicesManager {
         }
 
         SERVICE_STATUS serviceStatus = new SERVICE_STATUS();
-        success = QueryServiceStatus(
-                serviceHandle,
-                out serviceStatus);
+        success = QueryServiceStatus(serviceHandle, out serviceStatus);
         if (!success) {
-            Cleanup(databaseHandle, serviceHandle, out errMsg);
+            string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
+            CloseServiceHandle(serviceHandle);
+            CloseServiceHandle(databaseHandle);
             throw new ExternalException("Unable to get service status for '" + serviceName + "': " + errMsg);
         }
         props.ServiceStatus.SERVICE_STATUS = serviceStatus;
@@ -230,6 +237,8 @@ class ServicesManager {
         CloseServiceHandle(databaseHandle);
         CloseServiceHandle(serviceHandle);
 
+        PrintServiceProperties(props);
+
         return props;
     }
 
@@ -239,8 +248,6 @@ class ServicesManager {
         ServiceStartMode startMode) {
 
         ServiceProperties props = GetServiceProperties(serviceName);
-
-        string errMsg;
 
         IntPtr databaseHandle = OpenSCManager(
             null,
@@ -257,19 +264,19 @@ class ServicesManager {
             serviceName,
             NativeConstants.Service.SERVICE_ALL_ACCESS);
         if (serviceHandle == IntPtr.Zero) {
-            Cleanup(databaseHandle, IntPtr.Zero, out errMsg);
+            string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
+            CloseServiceHandle(databaseHandle);
             throw new ExternalException("Unable to OpenService '" + serviceName + "':" + errMsg);
         }
 
         // Change service startType config
         Int32 dwStartType;
-        SERVICE_DELAYED_AUTO_START_INFO DelayedInfo =
-            new SERVICE_DELAYED_AUTO_START_INFO();
-        DelayedInfo.fDelayedAutostart = false;
+        SERVICE_DELAYED_AUTO_START_INFO delayedInfo = new SERVICE_DELAYED_AUTO_START_INFO();
+        delayedInfo.fDelayedAutostart = false;
         switch (startMode) {
             case ServiceStartMode.AutomaticDelayed:
                 dwStartType = NativeConstants.Service.SERVICE_AUTO_START;
-                DelayedInfo.fDelayedAutostart = true;
+                delayedInfo.fDelayedAutostart = true;
                 break;
             case ServiceStartMode.Automatic:
                 dwStartType = NativeConstants.Service.SERVICE_AUTO_START;
@@ -315,18 +322,22 @@ class ServicesManager {
                 IntPtr.Zero,
                 // display name: no change
                 IntPtr.Zero)) {
-            Cleanup(databaseHandle, serviceHandle, out errMsg);
+            string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
+            CloseServiceHandle(serviceHandle);
+            CloseServiceHandle(databaseHandle);
             throw new ExternalException("Unable to change configuration for service '" + serviceName + "':" + errMsg);
         }
 
-        IntPtr pDelayedInfo = Marshal.AllocHGlobal(Marshal.SizeOf(DelayedInfo));
-        Marshal.StructureToPtr(DelayedInfo, pDelayedInfo, true);
+        IntPtr pDelayedInfo = Marshal.AllocHGlobal(Marshal.SizeOf(delayedInfo));
+        Marshal.StructureToPtr(delayedInfo, pDelayedInfo, true);
 
         if (!ChangeServiceConfig2(
                 serviceHandle,
                 NativeConstants.Service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
                 pDelayedInfo)) {
-            Cleanup(databaseHandle, serviceHandle, out errMsg);
+            string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
+            CloseServiceHandle(serviceHandle);
+            CloseServiceHandle(databaseHandle);
             Marshal.FreeHGlobal(pDelayedInfo);
             pDelayedInfo = IntPtr.Zero;
             throw new ExternalException("Unable to change configuration for service '" + serviceName + "':" + errMsg);
@@ -347,7 +358,7 @@ class ServicesManager {
         }
     }
 
-    static private void PrintServiceProperties(ServiceProperties props) {
+    static void PrintServiceProperties(ServiceProperties props) {
         
         Console.WriteLine("DisplayName: '" + props.DisplayName + "'");
         Console.WriteLine("StartMode: '" + props.StartMode + "'");
@@ -359,58 +370,36 @@ class ServicesManager {
         Console.ReadLine();
     }
 
-    static private void Cleanup(
-        IntPtr databaseHandle,
-        IntPtr serviceHandle,
-        out string errMsg) {
+    static string GetErrorMessage(int errorCode) {
 
-        int errCode = Marshal.GetLastWin32Error();
-        if (serviceHandle != IntPtr.Zero) {
-            CloseServiceHandle(serviceHandle);
-        }
-
-        if (databaseHandle != IntPtr.Zero) {
-            CloseServiceHandle(databaseHandle);
-        }
         // We can't get the capitalized error constant programatically. This
         // piss of code is thus needed. Otherwise we need to load a file
         // containing all Win32 error constants.
         // src.: https://stackoverflow.com/a/30204142/3514658
         // src.: http://pinvoke.net/default.aspx/Constants/WINERROR.html
-        switch (errCode) {
+        switch (errorCode) {
             case NativeConstants.SystemErrorCode.ERROR_ACCESS_DENIED:
-                errMsg = "ERROR_ACCESS_DENIED";
-                break;
+                return "ERROR_ACCESS_DENIED";
             case NativeConstants.SystemErrorCode.ERROR_INSUFFICIENT_BUFFER:
-                errMsg = "ERROR_INSUFFICIENT_BUFFER";
-                break;
+                return "ERROR_INSUFFICIENT_BUFFER";
             case NativeConstants.SystemErrorCode.ERROR_INVALID_HANDLE:
-                errMsg = "ERROR_INVALID_HANDLE";
-                break;
+                return "ERROR_INVALID_HANDLE";
             case NativeConstants.SystemErrorCode.ERROR_INVALID_NAME:
-                errMsg = "ERROR_INVALID_NAME";
-                break;
+                return "ERROR_INVALID_NAME";
             case NativeConstants.SystemErrorCode.ERROR_SERVICE_DOES_NOT_EXIST:
-                errMsg = "ERROR_SERVICE_DOES_NOT_EXIST";
-                break;
+                return "ERROR_SERVICE_DOES_NOT_EXIST";
             case NativeConstants.SystemErrorCode.ERROR_CIRCULAR_DEPENDENCY:
-                errMsg = "ERROR_CIRCULAR_DEPENDENCY";
-                break;
+                return "ERROR_CIRCULAR_DEPENDENCY";
             case NativeConstants.SystemErrorCode.ERROR_DUPLICATE_SERVICE_NAME:
-                errMsg = "ERROR_DUPLICATE_SERVICE_NAME";
-                break;
+                return "ERROR_DUPLICATE_SERVICE_NAME";
             case NativeConstants.SystemErrorCode.ERROR_INVALID_PARAMETER:
-                errMsg = "ERROR_INVALID_PARAMETER";
-                break;
+                return "ERROR_INVALID_PARAMETER";
             case NativeConstants.SystemErrorCode.ERROR_INVALID_SERVICE_ACCOUNT:
-                errMsg = "ERROR_INVALID_SERVICE_ACCOUNT";
-                break;
+                return "ERROR_INVALID_SERVICE_ACCOUNT";
             case NativeConstants.SystemErrorCode.ERROR_SERVICE_MARKED_FOR_DELETE:
-                errMsg = "ERROR_SERVICE_MARKED_FOR_DELETE";
-                break;
+                return "ERROR_SERVICE_MARKED_FOR_DELETE";
             default:
-                errMsg = errCode.ToString();
-                break;
+                return errorCode.ToString();
         }
     }
 
