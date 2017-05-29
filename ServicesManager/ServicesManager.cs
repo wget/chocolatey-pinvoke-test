@@ -11,10 +11,13 @@ public class ServiceManager {
 
     static void Main(string[] args) {
         // Use the service name and *NOT* the display name.
-        ServiceManager serviceManager = new ServiceManager();
+        //ServiceManager serviceManager = new ServiceManager();
         ServiceProperties props = ServiceManager.GetServiceProperties("Dnscache");
         ServiceManager.PrintServiceProperties(props);
-        ServiceManager.SetServiceProperties("OpenVPNService", ServiceControllerStatus.Running, ServiceStartMode.AutomaticDelayed);
+        ServiceManager.SetServiceProperties(
+            "OpenVPNService",
+            ServiceControllerStatus.Running,
+            ServiceStartMode.AutomaticDelayed);
     }
 
     static public ServiceProperties GetServiceProperties(string serviceName) {
@@ -29,7 +32,8 @@ public class ServiceManager {
         // An error might happen here if we are not running as administrator and the service
         // database is locked.
         if (databaseHandle == IntPtr.Zero) {
-            throw new ExternalException("Unable to OpenSCManager. Not enough rights.");
+            throw new ExternalException(
+                "Unable to OpenSCManager. Not enough rights.");
         }
 
         IntPtr serviceHandle = OpenService(
@@ -39,7 +43,8 @@ public class ServiceManager {
         if (serviceHandle == IntPtr.Zero) {
             string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
             CloseServiceHandle(databaseHandle);
-            throw new ExternalException("Unable to OpenService '" + serviceName + "':" + errMsg);
+            throw new ExternalException(
+                "Unable to OpenService '" + serviceName + "':" + errMsg);
         }
 
         // Take basic info. Everything is taken into account except the
@@ -52,23 +57,31 @@ public class ServiceManager {
 
         // Determine the buffer size needed (dwBytesNeeded).
         success = QueryServiceConfig(serviceHandle, IntPtr.Zero, 0, out dwBytesNeeded);
-        if (!success && Marshal.GetLastWin32Error() != NativeConstants.SystemErrorCode.ERROR_INSUFFICIENT_BUFFER) {
+        if (!success &&
+            Marshal.GetLastWin32Error() !=
+            NativeConstants.SystemErrorCode.ERROR_INSUFFICIENT_BUFFER) {
             string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
             CloseServiceHandle(serviceHandle);
             CloseServiceHandle(databaseHandle);
-            throw new ExternalException("Unable to get service config for '" + serviceName + "': " + errMsg);
+            throw new ExternalException(
+                "Unable to get service config for '" + serviceName + "': " + errMsg);
         }
 
         // Get the main info of the service. See this struct for more info:
         // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684950(v=vs.85).aspx
         IntPtr ptr = Marshal.AllocHGlobal((int)dwBytesNeeded);
-        success = QueryServiceConfig(serviceHandle, ptr, dwBytesNeeded, out dwBytesNeeded);
+        success = QueryServiceConfig(
+            serviceHandle,
+            ptr,
+            dwBytesNeeded,
+            out dwBytesNeeded);
         if (!success) {
             Marshal.FreeHGlobal(ptr);
             string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
             CloseServiceHandle(serviceHandle);
             CloseServiceHandle(databaseHandle);
-            throw new ExternalException("Unable to get service config for '" + serviceName + "': " + errMsg);
+            throw new ExternalException(
+                "Unable to get service config for '" + serviceName + "': " + errMsg);
         }
         // Copy memory to serviceConfig.
         QUERY_SERVICE_CONFIG serviceConfig = new QUERY_SERVICE_CONFIG();
@@ -90,6 +103,17 @@ public class ServiceManager {
         infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_SERVICE_SID_INFO);
         infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_TRIGGER_INFO);
         infoLevels.Add(NativeConstants.Service.SERVICE_CONFIG_LAUNCH_PROTECTED);
+        List<string> infoLevelsDesc = new List<string>();
+        infoLevelsDesc.Add("SERVICE_CONFIG_DELAYED_AUTO_START_INFO");
+        infoLevelsDesc.Add("SERVICE_CONFIG_DESCRIPTION");
+        infoLevelsDesc.Add("SERVICE_CONFIG_FAILURE_ACTIONS");
+        infoLevelsDesc.Add("SERVICE_CONFIG_FAILURE_ACTIONS_FLAG");
+        infoLevelsDesc.Add("SERVICE_CONFIG_PREFERRED_NODE");
+        infoLevelsDesc.Add("SERVICE_CONFIG_PRESHUTDOWN_INFO");
+        infoLevelsDesc.Add("SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO");
+        infoLevelsDesc.Add("SERVICE_CONFIG_SERVICE_SID_INFO");
+        infoLevelsDesc.Add("SERVICE_CONFIG_TRIGGER_INFO");
+        infoLevelsDesc.Add("SERVICE_CONFIG_LAUNCH_PROTECTED");
         for (int i = 0; i < infoLevels.Count; i++) {
 
             // Determine the buffer size needed (dwBytesNeeded).
@@ -99,7 +123,9 @@ public class ServiceManager {
                 IntPtr.Zero,
                 0,
                 out dwBytesNeeded);
-            if (!success && Marshal.GetLastWin32Error() != NativeConstants.SystemErrorCode.ERROR_INSUFFICIENT_BUFFER) {
+            if (!success &&
+                Marshal.GetLastWin32Error() !=
+                NativeConstants.SystemErrorCode.ERROR_INSUFFICIENT_BUFFER) {
                 continue;
             }
 
@@ -113,10 +139,13 @@ public class ServiceManager {
                     out dwBytesNeeded);
             if (!success) {
                 Marshal.FreeHGlobal(ptr);
-                string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
+                string errMsg = "Unable to get the configuration" +
+                    "parameter (QueryServiceConfig2) for '" + infoLevelsDesc[i] +
+                    "' for the service '" + serviceName + "': " +
+                    GetErrorMessage(Marshal.GetLastWin32Error());
                 CloseServiceHandle(serviceHandle);
                 CloseServiceHandle(databaseHandle);
-                throw new ExternalException("Unable to get service delayed auto start property for '" + serviceName + "': " + errMsg);
+                throw new ExternalException(errMsg);
             }
 
             // While we could use introspection to be able to take on the fly
@@ -124,43 +153,63 @@ public class ServiceManager {
             // instrospection is a costly process.
             switch (infoLevels[i]) {
                 case NativeConstants.Service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO:
-                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_DELAYED_AUTO_START_INFO);
+                    Marshal.PtrToStructure(
+                        ptr,
+                        props.ServiceConfig2.SERVICE_DELAYED_AUTO_START_INFO);
                     break;
 
                 case NativeConstants.Service.SERVICE_CONFIG_DESCRIPTION:
-                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_DESCRIPTION);
+                    Marshal.PtrToStructure(
+                        ptr,
+                        props.ServiceConfig2.SERVICE_DESCRIPTION);
                     break;
 
                 case NativeConstants.Service.SERVICE_CONFIG_FAILURE_ACTIONS:
-                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_FAILURE_ACTIONS);
+                    Marshal.PtrToStructure(
+                        ptr,
+                        props.ServiceConfig2.SERVICE_FAILURE_ACTIONS);
                     break;
 
                 case NativeConstants.Service.SERVICE_CONFIG_FAILURE_ACTIONS_FLAG:
-                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_FAILURE_ACTIONS_FLAG);
+                    Marshal.PtrToStructure(
+                        ptr,
+                        props.ServiceConfig2.SERVICE_FAILURE_ACTIONS_FLAG);
                     break;
 
                 case NativeConstants.Service.SERVICE_CONFIG_PREFERRED_NODE:
-                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_PREFERRED_NODE_INFO);
+                    Marshal.PtrToStructure(
+                        ptr,
+                        props.ServiceConfig2.SERVICE_PREFERRED_NODE_INFO);
                     break;
 
                 case NativeConstants.Service.SERVICE_CONFIG_PRESHUTDOWN_INFO:
-                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_PRESHUTDOWN_INFO);
+                    Marshal.PtrToStructure(
+                        ptr,
+                        props.ServiceConfig2.SERVICE_PRESHUTDOWN_INFO);
                     break;
 
                 case NativeConstants.Service.SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO:
-                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_REQUIRED_PRIVILEGES_INFO);
+                    Marshal.PtrToStructure(
+                        ptr,
+                        props.ServiceConfig2.SERVICE_REQUIRED_PRIVILEGES_INFO);
                     break;
 
                 case NativeConstants.Service.SERVICE_CONFIG_SERVICE_SID_INFO:
-                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_SID_INFO);
+                    Marshal.PtrToStructure(
+                        ptr,
+                        props.ServiceConfig2.SERVICE_SID_INFO);
                     break;
 
                 case NativeConstants.Service.SERVICE_CONFIG_TRIGGER_INFO:
-                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_TRIGGER_INFO);
+                    Marshal.PtrToStructure(
+                        ptr,
+                        props.ServiceConfig2.SERVICE_TRIGGER_INFO);
                     break;
 
                 case NativeConstants.Service.SERVICE_CONFIG_LAUNCH_PROTECTED:
-                    Marshal.PtrToStructure(ptr, props.ServiceConfig2.SERVICE_LAUNCH_PROTECTED_INFO);
+                    Marshal.PtrToStructure(
+                        ptr,
+                        props.ServiceConfig2.SERVICE_LAUNCH_PROTECTED_INFO);
                     break;
             }
             Marshal.FreeHGlobal(ptr);
@@ -169,10 +218,12 @@ public class ServiceManager {
         SERVICE_STATUS serviceStatus = new SERVICE_STATUS();
         success = QueryServiceStatus(serviceHandle, out serviceStatus);
         if (!success) {
-            string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
+            string errMsg = "Unable to get service status for '" +
+                serviceName + "': " +
+                GetErrorMessage(Marshal.GetLastWin32Error());
             CloseServiceHandle(serviceHandle);
             CloseServiceHandle(databaseHandle);
-            throw new ExternalException("Unable to get service status for '" + serviceName + "': " + errMsg);
+            throw new ExternalException(errMsg);
         }
         props.ServiceStatus.SERVICE_STATUS = serviceStatus;
 
@@ -203,7 +254,8 @@ public class ServiceManager {
             default:
                 CloseServiceHandle(databaseHandle);
                 CloseServiceHandle(serviceHandle);
-                throw new ExternalException("The service '" + serviceName + "' has an invalid start type");
+                throw new ExternalException(
+                    "The service '" + serviceName + "' has an invalid start type");
         }
 
         switch (serviceStatus.dwCurrentState) {
@@ -231,7 +283,8 @@ public class ServiceManager {
             default:
                 CloseServiceHandle(databaseHandle);
                 CloseServiceHandle(serviceHandle);
-                throw new ExternalException("The service '" + serviceName + "' has an invalid status");
+                throw new ExternalException(
+                    "The service '" + serviceName + "' has an invalid status");
         }
 
         CloseServiceHandle(databaseHandle);
@@ -256,7 +309,8 @@ public class ServiceManager {
         // An error might happen here if we are not running as administrator and the service
         // database is locked.
         if (databaseHandle == IntPtr.Zero) {
-            throw new ExternalException("Unable to OpenSCManager. Not enough rights.");
+            throw new ExternalException(
+                "Unable to OpenSCManager. Not enough rights.");
         }
 
         IntPtr serviceHandle = OpenService(
@@ -266,12 +320,14 @@ public class ServiceManager {
         if (serviceHandle == IntPtr.Zero) {
             string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
             CloseServiceHandle(databaseHandle);
-            throw new ExternalException("Unable to OpenService '" + serviceName + "':" + errMsg);
+            throw new ExternalException(
+                "Unable to OpenService '" + serviceName + "':" + errMsg);
         }
 
         // Change service startType config
         Int32 dwStartType;
-        SERVICE_DELAYED_AUTO_START_INFO delayedInfo = new SERVICE_DELAYED_AUTO_START_INFO();
+        SERVICE_DELAYED_AUTO_START_INFO delayedInfo =
+            new SERVICE_DELAYED_AUTO_START_INFO();
         delayedInfo.fDelayedAutostart = false;
         switch (startMode) {
             case ServiceStartMode.AutomaticDelayed:
@@ -296,7 +352,8 @@ public class ServiceManager {
             default:
                 CloseServiceHandle(databaseHandle);
                 CloseServiceHandle(serviceHandle);
-                throw new ExternalException("The service '" + serviceName + "' has an invalid start type");
+                throw new ExternalException(
+                    "The service '" + serviceName + "' has an invalid start type");
         }
 
         if (!ChangeServiceConfig(
@@ -325,7 +382,8 @@ public class ServiceManager {
             string errMsg = GetErrorMessage(Marshal.GetLastWin32Error());
             CloseServiceHandle(serviceHandle);
             CloseServiceHandle(databaseHandle);
-            throw new ExternalException("Unable to change configuration for service '" + serviceName + "':" + errMsg);
+            throw new ExternalException(
+                "Unable to change configuration for service '" + serviceName + "':" + errMsg);
         }
 
         IntPtr pDelayedInfo = Marshal.AllocHGlobal(Marshal.SizeOf(delayedInfo));
@@ -340,7 +398,8 @@ public class ServiceManager {
             CloseServiceHandle(databaseHandle);
             Marshal.FreeHGlobal(pDelayedInfo);
             pDelayedInfo = IntPtr.Zero;
-            throw new ExternalException("Unable to change configuration for service '" + serviceName + "':" + errMsg);
+            throw new ExternalException(
+                "Unable to change configuration for service '" + serviceName + "':" + errMsg);
         }
 
         Marshal.FreeHGlobal(pDelayedInfo);
@@ -367,6 +426,14 @@ public class ServiceManager {
         Console.WriteLine("lpDisplayName: '" + props.ServiceConfig.QUERY_SERVICE_CONFIG.lpDisplayName + "'");
         Console.WriteLine("lpDescription: '" + props.ServiceConfig2.SERVICE_DESCRIPTION.lpDescription + "'");
         Console.WriteLine("dwServiceSidType: '" + props.ServiceConfig2.SERVICE_SID_INFO.dwServiceSidType + "'");
+        Console.WriteLine("cTriggers: '" + props.ServiceConfig2.SERVICE_TRIGGER_INFO.cTriggers + "'");
+        int arraySize = props.ServiceConfig2.SERVICE_TRIGGER_INFO.cTriggers;
+        //if (arraySize > 0) {
+        //    Console.WriteLine("pTriggers: '" + props.ServiceConfig2.SERVICE_TRIGGER_INFO.pTriggers + "'");
+        //    GCHandle handle = GCHandle.Alloc(new SERVICE_TRIGGER[arraySize], GCHandleType.Pinned);
+        //    SERVICE_TRIGGER trigger = (handle.Target as SERVICE_TRIGGER[]);
+            //Console.WriteLine("pTriggers.dwTriggerType: '" + trigger.dwTriggerType + "'");
+        //}
         Console.ReadLine();
     }
 
@@ -415,20 +482,31 @@ public class ServiceManager {
     }
 
     public class ServiceConfig {
-        public QUERY_SERVICE_CONFIG QUERY_SERVICE_CONFIG = new QUERY_SERVICE_CONFIG();
+        public QUERY_SERVICE_CONFIG QUERY_SERVICE_CONFIG =
+            new QUERY_SERVICE_CONFIG();
     }
 
     public class ServiceConfig2 {
-        public SERVICE_DELAYED_AUTO_START_INFO SERVICE_DELAYED_AUTO_START_INFO = new SERVICE_DELAYED_AUTO_START_INFO();
-        public SERVICE_DESCRIPTION SERVICE_DESCRIPTION = new SERVICE_DESCRIPTION();
-        public SERVICE_FAILURE_ACTIONS SERVICE_FAILURE_ACTIONS = new SERVICE_FAILURE_ACTIONS();
-        public SERVICE_FAILURE_ACTIONS_FLAG SERVICE_FAILURE_ACTIONS_FLAG = new SERVICE_FAILURE_ACTIONS_FLAG();
-        public SERVICE_PREFERRED_NODE_INFO SERVICE_PREFERRED_NODE_INFO = new SERVICE_PREFERRED_NODE_INFO();
-        public SERVICE_PRESHUTDOWN_INFO SERVICE_PRESHUTDOWN_INFO = new SERVICE_PRESHUTDOWN_INFO();
-        public SERVICE_REQUIRED_PRIVILEGES_INFO SERVICE_REQUIRED_PRIVILEGES_INFO = new SERVICE_REQUIRED_PRIVILEGES_INFO();
-        public SERVICE_SID_INFO SERVICE_SID_INFO = new SERVICE_SID_INFO();
-        public SERVICE_TRIGGER_INFO SERVICE_TRIGGER_INFO = new SERVICE_TRIGGER_INFO();
-        public SERVICE_LAUNCH_PROTECTED_INFO SERVICE_LAUNCH_PROTECTED_INFO = new SERVICE_LAUNCH_PROTECTED_INFO();
+        public SERVICE_DELAYED_AUTO_START_INFO SERVICE_DELAYED_AUTO_START_INFO =
+            new SERVICE_DELAYED_AUTO_START_INFO();
+        public SERVICE_DESCRIPTION SERVICE_DESCRIPTION =
+            new SERVICE_DESCRIPTION();
+        public SERVICE_FAILURE_ACTIONS SERVICE_FAILURE_ACTIONS =
+            new SERVICE_FAILURE_ACTIONS();
+        public SERVICE_FAILURE_ACTIONS_FLAG SERVICE_FAILURE_ACTIONS_FLAG =
+            new SERVICE_FAILURE_ACTIONS_FLAG();
+        public SERVICE_PREFERRED_NODE_INFO SERVICE_PREFERRED_NODE_INFO =
+            new SERVICE_PREFERRED_NODE_INFO();
+        public SERVICE_PRESHUTDOWN_INFO SERVICE_PRESHUTDOWN_INFO =
+            new SERVICE_PRESHUTDOWN_INFO();
+        public SERVICE_REQUIRED_PRIVILEGES_INFO SERVICE_REQUIRED_PRIVILEGES_INFO =
+            new SERVICE_REQUIRED_PRIVILEGES_INFO();
+        public SERVICE_SID_INFO SERVICE_SID_INFO =
+            new SERVICE_SID_INFO();
+        public SERVICE_TRIGGER_INFO SERVICE_TRIGGER_INFO =
+            new SERVICE_TRIGGER_INFO();
+        public SERVICE_LAUNCH_PROTECTED_INFO SERVICE_LAUNCH_PROTECTED_INFO =
+            new SERVICE_LAUNCH_PROTECTED_INFO();
     }
 
     public class ServiceStatus {
@@ -598,12 +676,14 @@ public class ServiceManager {
     [StructLayout(LayoutKind.Sequential)]
     public class SERVICE_TRIGGER_INFO {
         public int cTriggers;
+        // Pointer to an array of SERVICE_TRIGGER
         public IntPtr pTriggers;
+        // Member reserved, must be NULL.
         public IntPtr pReserved;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public class PSERVICE_TRIGGER {
+    public class SERVICE_TRIGGER {
         public uint dwTriggerType;
         public uint dwAction;
         public IntPtr pTriggerSubtype;
@@ -626,11 +706,23 @@ public class ServiceManager {
     // The following page is a great use to find types equivalence between
     // C++ et .NET types.
     // src.: https://www.codeproject.com/Articles/9714/Win-API-C-to-NET
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern IntPtr OpenSCManager(String lpMachineName, String lpDatabaseName, UInt32 dwDesiredAccess);
+    [DllImport(
+        "advapi32.dll",
+        CharSet = CharSet.Unicode,
+        SetLastError = true)]
+    public static extern IntPtr OpenSCManager(
+        String lpMachineName,
+        String lpDatabaseName,
+        UInt32 dwDesiredAccess);
 
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern IntPtr OpenService(IntPtr hSCManager, String lpServiceName, UInt32 dwDesiredAccess);
+    [DllImport(
+        "advapi32.dll",
+        CharSet = CharSet.Unicode,
+        SetLastError = true)]
+    public static extern IntPtr OpenService(
+        IntPtr hSCManager,
+        String lpServiceName,
+        UInt32 dwDesiredAccess);
 
     // The EntryPoint specifies a DLL function by name or ordinal. If the name
     // of the function in our method definition is the same as the entry
@@ -638,16 +730,43 @@ public class ServiceManager {
     // with the EntryPoint field. Here since we are mapping QueryServiceConfig
     // to QueryServiceConfigW, this property is needed.
     // src. https://msdn.microsoft.com/en-us/library/f5xe74x8(v=vs.110).aspx#Anchor_1
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "QueryServiceConfigW")]
-    public static extern bool QueryServiceConfig(IntPtr hService, IntPtr lpServiceConfig, UInt32 cbBufSize, out UInt32 pcbBytesNeeded);
+    [DllImport(
+        "advapi32.dll",
+        CharSet = CharSet.Unicode,
+        SetLastError = true,
+        EntryPoint = "QueryServiceConfigW")]
+    public static extern bool QueryServiceConfig(
+        IntPtr hService,
+        IntPtr lpServiceConfig,
+        UInt32 cbBufSize,
+        out UInt32 pcbBytesNeeded);
 
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "QueryServiceConfig2W")]
-    public static extern bool QueryServiceConfig2(IntPtr hService, UInt32 dwInfoLevel, IntPtr buffer, UInt32 cbBufSize, out UInt32 pcbBytesNeeded);
+    [DllImport(
+        "advapi32.dll",
+        CharSet = CharSet.Unicode,
+        SetLastError = true,
+        EntryPoint = "QueryServiceConfig2W")]
+    public static extern bool QueryServiceConfig2(
+        IntPtr hService,
+        UInt32 dwInfoLevel,
+        IntPtr buffer,
+        UInt32 cbBufSize,
+        out UInt32 pcbBytesNeeded);
 
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "QueryServiceStatus")]
-    public static extern bool QueryServiceStatus(IntPtr hService, out SERVICE_STATUS lpServiceStatus);
+    [DllImport(
+        "advapi32.dll",
+        CharSet = CharSet.Unicode,
+        SetLastError = true,
+        EntryPoint = "QueryServiceStatus")]
+    public static extern bool QueryServiceStatus(
+        IntPtr hService,
+        out SERVICE_STATUS lpServiceStatus);
 
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "ChangeServiceConfigW")]
+    [DllImport(
+        "advapi32.dll",
+        CharSet = CharSet.Unicode,
+        SetLastError = true,
+        EntryPoint = "ChangeServiceConfigW")]
     public static extern bool ChangeServiceConfig(
         IntPtr hService,
         Int32 dwServiceType,
@@ -661,11 +780,23 @@ public class ServiceManager {
         IntPtr lpPassword,
         IntPtr lpDisplayName);
 
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "ChangeServiceConfig2W")]
-    public static extern bool ChangeServiceConfig2(IntPtr hService, UInt32 dwInfoLevel, IntPtr lpInfo);
+    [DllImport(
+        "advapi32.dll",
+        CharSet = CharSet.Unicode,
+        SetLastError = true,
+        EntryPoint = "ChangeServiceConfig2W")]
+    public static extern bool ChangeServiceConfig2(
+        IntPtr hService,
+        UInt32 dwInfoLevel,
+        IntPtr lpInfo);
 
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CloseServiceHandle")]
-    public static extern bool CloseServiceHandle(IntPtr hSCObject);
+    [DllImport(
+        "advapi32.dll",
+        CharSet = CharSet.Unicode,
+        SetLastError = true,
+        EntryPoint = "CloseServiceHandle")]
+    public static extern bool CloseServiceHandle(
+        IntPtr hSCObject);
 
     #endregion P/Invoke functions
 
@@ -736,13 +867,22 @@ public class ServiceManager {
             // From Service Control Manager access rights
             // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685981(v=vs.85).aspx#access_rights_for_the_service_control_manager
 
-            /// SC_MANAGER_ALL_ACCESS -> (STANDARD_RIGHTS_REQUIRED      |                                         SC_MANAGER_CONNECT            |                                         SC_MANAGER_CREATE_SERVICE     |                                         SC_MANAGER_ENUMERATE_SERVICE  |                                         SC_MANAGER_LOCK               |                                         SC_MANAGER_QUERY_LOCK_STATUS  |                                         SC_MANAGER_MODIFY_BOOT_CONFIG)
-            public const int SC_MANAGER_ALL_ACCESS = (ServiceControlManager.STANDARD_RIGHTS_REQUIRED
-                        | (ServiceControlManager.SC_MANAGER_CONNECT
-                        | (ServiceControlManager.SC_MANAGER_CREATE_SERVICE
-                        | (ServiceControlManager.SC_MANAGER_ENUMERATE_SERVICE
-                        | (ServiceControlManager.SC_MANAGER_LOCK
-                        | (ServiceControlManager.SC_MANAGER_QUERY_LOCK_STATUS | NativeConstants.ServiceControlManager.SC_MANAGER_MODIFY_BOOT_CONFIG))))));
+            /// SC_MANAGER_ALL_ACCESS -> 
+            /// (STANDARD_RIGHTS_REQUIRED |
+            ///  SC_MANAGER_CONNECT |
+            ///  SC_MANAGER_CREATE_SERVICE |
+            ///  SC_MANAGER_ENUMERATE_SERVICE |
+            ///  SC_MANAGER_LOCK |
+            ///  SC_MANAGER_QUERY_LOCK_STATUS |
+            ///  SC_MANAGER_MODIFY_BOOT_CONFIG)
+            public const int SC_MANAGER_ALL_ACCESS = (
+                ServiceControlManager.STANDARD_RIGHTS_REQUIRED
+                    | (ServiceControlManager.SC_MANAGER_CONNECT
+                    | (ServiceControlManager.SC_MANAGER_CREATE_SERVICE
+                    | (ServiceControlManager.SC_MANAGER_ENUMERATE_SERVICE
+                    | (ServiceControlManager.SC_MANAGER_LOCK
+                    | (ServiceControlManager.SC_MANAGER_QUERY_LOCK_STATUS
+                | ServiceControlManager.SC_MANAGER_MODIFY_BOOT_CONFIG))))));
             /// SC_MANAGER_CREATE_SERVICE -> 0x0002
             public const int SC_MANAGER_CREATE_SERVICE = 2;
             /// SC_MANAGER_CONNECT -> 0x0001
@@ -765,16 +905,28 @@ public class ServiceManager {
             // From Service access rights
             // src.: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685981(v=vs.85).aspx#access_rights_for_a_service
 
-            /// SERVICE_ALL_ACCESS -> (STANDARD_RIGHTS_REQUIRED     |                                         SERVICE_QUERY_CONFIG         |                                         SERVICE_CHANGE_CONFIG        |                                         SERVICE_QUERY_STATUS         |                                         SERVICE_ENUMERATE_DEPENDENTS |                                         SERVICE_START                |                                         SERVICE_STOP                 |                                         SERVICE_PAUSE_CONTINUE       |                                         SERVICE_INTERROGATE          |                                         SERVICE_USER_DEFINED_CONTROL)
-            public const int SERVICE_ALL_ACCESS = (Service.STANDARD_RIGHTS_REQUIRED
-                        | (Service.SERVICE_QUERY_CONFIG
-                        | (Service.SERVICE_CHANGE_CONFIG
-                        | (Service.SERVICE_QUERY_STATUS
-                        | (Service.SERVICE_ENUMERATE_DEPENDENTS
-                        | (Service.SERVICE_START
-                        | (Service.SERVICE_STOP
-                        | (Service.SERVICE_PAUSE_CONTINUE
-                        | (Service.SERVICE_INTERROGATE | NativeConstants.Service.SERVICE_USER_DEFINED_CONTROL)))))))));
+            /// SERVICE_ALL_ACCESS ->
+            /// (STANDARD_RIGHTS_REQUIRED |
+            ///  SERVICE_QUERY_CONFIG |
+            ///  SERVICE_CHANGE_CONFIG |
+            ///  SERVICE_QUERY_STATUS |
+            ///  SERVICE_ENUMERATE_DEPENDENTS |
+            ///  SERVICE_START |
+            ///  SERVICE_STOP |
+            ///  SERVICE_PAUSE_CONTINUE |
+            ///  SERVICE_INTERROGATE |
+            ///  SERVICE_USER_DEFINED_CONTROL)
+            public const int SERVICE_ALL_ACCESS =
+                (Service.STANDARD_RIGHTS_REQUIRED
+                    | (Service.SERVICE_QUERY_CONFIG
+                    | (Service.SERVICE_CHANGE_CONFIG
+                    | (Service.SERVICE_QUERY_STATUS
+                    | (Service.SERVICE_ENUMERATE_DEPENDENTS
+                    | (Service.SERVICE_START
+                    | (Service.SERVICE_STOP
+                    | (Service.SERVICE_PAUSE_CONTINUE
+                    | (Service.SERVICE_INTERROGATE
+                | NativeConstants.Service.SERVICE_USER_DEFINED_CONTROL)))))))));
             /// SERVICE_CHANGE_CONFIG -> 0x0002
             public const int SERVICE_CHANGE_CONFIG = 2;
             /// SERVICE_ENUMERATE_DEPENDENTS -> 0x0008
